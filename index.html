@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SNA Login — OTPLESS</title>
+
+<!--
+  ============================================================
+  OTPLESS Headless SDK
+  Replace YOUR_APP_ID below with the App ID from:
+  https://otpless.com/dashboard/customer/dev-settings/apiKeys
+
+  IMPORTANT: SNA must be enabled for your App ID first.
+  Contact your OTPLESS Relationship Manager or
+  support@otpless.com to activate it — until then this will
+  fall back to your configured fallback channel (WhatsApp/
+  SMS/Viber) instead of doing a true silent network check.
+  ============================================================
+-->
+<script id="otpless-sdk" src="https://otpless.com/v3/headless.js" data-appid="YOUR_APP_ID"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115;
+    color: #f2f2f2;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 380px;
+    background: #1a1d24;
+    border-radius: 16px;
+    padding: 28px 24px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 6px;
+  }
+  p.sub {
+    color: #9aa0ab;
+    font-size: 14px;
+    margin: 0 0 24px;
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  select {
+    flex: 0 0 84px;
+    background: #22262f;
+    border: 1px solid #33384333;
+    border-radius: 10px;
+    color: #f2f2f2;
+    padding: 12px 8px;
+    font-size: 15px;
+  }
+  input {
+    flex: 1;
+    background: #22262f;
+    border: 1px solid #33384333;
+    border-radius: 10px;
+    color: #f2f2f2;
+    padding: 12px 14px;
+    font-size: 15px;
+    min-width: 0;
+  }
+  input::placeholder { color: #6b7280; }
+  button {
+    width: 100%;
+    background: #4f6df5;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 13px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  button:active { opacity: 0.85; }
+  #status {
+    margin-top: 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 18px;
+  }
+  .status-info { color: #9aa0ab; }
+  .status-success { color: #4ade80; }
+  .status-error { color: #f87171; }
+  .result-box {
+    margin-top: 14px;
+    background: #22262f;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+    color: #c8cdd6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Sign in</h1>
+  <p class="sub">Verified silently via your mobile network. No OTP needed if SNA succeeds.</p>
+
+  <div class="row">
+    <select id="country-code">
+      <option value="+91">🇮🇳 +91</option>
+      <option value="+62">🇮🇩 +62</option>
+      <option value="+1">🇺🇸 +1</option>
+      <option value="+44">🇬🇧 +44</option>
+      <option value="+971">🇦🇪 +971</option>
+    </select>
+    <input id="mobile-input" type="tel" inputmode="numeric" placeholder="Mobile number" />
+  </div>
+
+  <button id="verify-btn" onclick="phoneAuth()">Verify</button>
+
+  <div id="status" class="status-info"></div>
+  <pre id="result" class="result-box"></pre>
+</div>
+
+<script>
+  let OTPlessSignin;
+
+  // Called by the OTPLESS SDK with the final auth result / interim events.
+  const callback = (userinfo) => {
+    console.log("OTPLESS callback:", userinfo);
+
+    // Interim lifecycle events (e.g. fallback_triggered) come through here too.
+    if (userinfo && userinfo.event) {
+      handleResponse(userinfo);
+      return;
+    }
+
+    // Successful auth payload — extract identities.
+    const otplessUser = userinfo;
+    const emailIdentity = otplessUser?.identities?.find(
+      (item) => item.identityType === "EMAIL"
+    );
+    const mobileIdentity = otplessUser?.identities?.find(
+      (item) => item.identityType === "MOBILE"
+    );
+
+    const token = otplessUser?.token;
+    const email = emailIdentity?.identityValue;
+    const mobile = mobileIdentity?.identityValue;
+    const name = emailIdentity?.name || mobileIdentity?.name;
+
+    setStatus("Verified successfully.", "success");
+    showResult({ token, email, mobile, name });
+
+    // ---- Your app logic here ----
+    // e.g. send `token` to your backend to create a session:
+    // fetch("/api/auth/verify", {
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({ token }),
+    // });
+  };
+
+  // Initialize once the SDK script has loaded.
+  window.addEventListener("load", () => {
+    if (typeof OTPless === "undefined") {
+      setStatus("OTPLESS SDK failed to load. Check network/App ID.", "error");
+      return;
+    }
+    OTPlessSignin = new OTPless(callback);
+  });
+
+  function phoneAuth() {
+    const countryCode = document.getElementById("country-code").value;
+    const phone = document.getElementById("mobile-input").value.trim();
+
+    if (!phone) {
+      setStatus("Enter a mobile number first.", "error");
+      return;
+    }
+    if (!OTPlessSignin) {
+      setStatus("SDK not ready yet — try again in a moment.", "error");
+      return;
+    }
+
+    setStatus("Checking your network for silent verification…", "info");
+    toggleButton(true);
+
+    OTPlessSignin.initiate({
+      channel: "PHONE",
+      phone: phone,
+      countryCode: countryCode,
+    });
+  }
+
+  function handleResponse(response) {
+    switch (response.event) {
+      case "fallback_triggered":
+        // Pre-check failed silently -> falling back to WhatsApp/SMS/Viber
+        // as configured on the OTPLESS dashboard.
+        setStatus("Network check unavailable — sending OTP via fallback channel.", "info");
+        break;
+      case "success":
+        setStatus("Verified successfully.", "success");
+        toggleButton(false);
+        break;
+      case "error":
+      case "failed":
+        setStatus("Verification failed: " + (response.reason || "unknown error"), "error");
+        toggleButton(false);
+        break;
+      default:
+        console.log("OTPLESS event:", response);
+    }
+  }
+
+  function setStatus(msg, kind) {
+    const el = document.getElementById("status");
+    el.textContent = msg;
+    el.className = "status-" + kind;
+  }
+
+  function showResult(obj) {
+    const el = document.getElementById("result");
+    el.style.display = "block";
+    el.textContent = JSON.stringify(obj, null, 2);
+  }
+
+  function toggleButton(disabled) {
+    document.getElementById("verify-btn").disabled = disabled;
+  }
+</script>
+
+</body>
+</html>
